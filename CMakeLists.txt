@@ -1,40 +1,61 @@
 cmake_minimum_required(VERSION 3.13)
+include($ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake)
 
-# initialize the SDK based on PICO_SDK_PATH
-# note: this must happen before project()
-include(pico_sdk_import.cmake)
-
-project(usb_character C CXX ASM)
-
+project(tomogatchi C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
-# initialize the Raspberry Pi Pico SDK
 pico_sdk_init()
 
-# --- character target ---
-add_executable(usb_character
-    main.c
-    usb_descriptors.c
-    msc_disk.c
-    sd_card.c
+# ── FatFs (SD card filesystem for USB MSC) ────────────────────────────────────
+include(FetchContent)
+FetchContent_Declare(fatfs
+    URL https://github.com/abbrev/fatfs/archive/refs/tags/R0.15.zip
+)
+FetchContent_MakeAvailable(fatfs)
+
+# Overwrite bundled ffconf.h with ours before anything compiles
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ffconf.h
+    ${fatfs_SOURCE_DIR}/source/ffconf.h
+    COPYONLY
 )
 
-target_include_directories(usb_character PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_library(fatfs_lib STATIC
+    ${fatfs_SOURCE_DIR}/source/ff.c
+    ${fatfs_SOURCE_DIR}/source/ffsystem.c
+    ${fatfs_SOURCE_DIR}/source/ffunicode.c
+)
+target_include_directories(fatfs_lib PUBLIC
+    ${fatfs_SOURCE_DIR}/source
+)
 
-target_link_libraries(usb_character
+# ── Main executable ───────────────────────────────────────────────────────────
+add_executable(tomogatchi
+    src/main.c
+    src/st7735.c
+    src/bmp.c
+    src/sd_card.c
+    src/usb_msc.c
+)
+
+target_include_directories(tomogatchi PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${fatfs_SOURCE_DIR}/source
+)
+
+target_link_libraries(tomogatchi
     pico_stdlib
+    hardware_spi
+    hardware_gpio
+    hardware_timer
     tinyusb_device
     tinyusb_board
-    hardware_i2c
-    hardware_spi
+    fatfs_lib
 )
 
-pico_add_extra_outputs(usb_character)
+# UART for debug output; USB port is used exclusively for MSC
+pico_enable_stdio_usb(tomogatchi 0)
+pico_enable_stdio_uart(tomogatchi 1)
 
-# --- blink target ---
-add_executable(blink blink.c)
-target_link_libraries(blink pico_stdlib)
-pico_enable_stdio_usb(blink 1)
-pico_enable_stdio_uart(blink 0)
-pico_add_extra_outputs(blink)
+pico_add_extra_outputs(tomogatchi)
